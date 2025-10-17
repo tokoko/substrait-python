@@ -106,6 +106,13 @@ def literal(
             )
         # TODO
         # IntervalYearToMonth interval_year_to_month = 19;
+        elif kind == "interval_day":
+            literal = stalg.Expression.Literal(
+                interval_day_to_second=stalg.Expression.Literal.IntervalDayToSecond(
+                    days=
+                )
+            )
+            from datetime import timedelta    
         # IntervalDayToSecond interval_day_to_second = 20;
         # IntervalCompound interval_compound = 36;
         elif kind == "fixed_char":
@@ -204,12 +211,12 @@ def column(field: Union[str, int], alias: Union[Iterable[str], str] = None):
 
 
 def scalar_function(
-    uri: str,
-    function: str,
+    function: Union[Iterable[str], str],
     expressions: Iterable[ExtendedExpressionOrUnbound],
     alias: Union[Iterable[str], str] = None,
 ):
     """Builds a resolver for ExtendedExpression containing a ScalarFunction expression"""
+    functions = [function] if isinstance(function, str) else function
 
     def resolve(
         base_schema: stp.NamedStruct, registry: ExtensionRegistry
@@ -224,23 +231,27 @@ def scalar_function(
 
         signature = [typ for es in expression_schemas for typ in es.types]
 
-        func = registry.lookup_function(uri, function, signature)
+        for f in functions:
+            uri, name = f.split(":")
+            func = registry.lookup_function(uri, name, signature)
+            if func:
+                break
 
         if not func:
             raise Exception(f"Unknown function {function} for {signature}")
 
         func_extension_uris = [
             ste.SimpleExtensionURI(
-                extension_uri_anchor=registry.lookup_uri(uri), uri=uri
+                extension_uri_anchor=registry.lookup_uri(func[0].uri), uri=func[0].uri
             )
         ]
 
         func_extensions = [
             ste.SimpleExtensionDeclaration(
                 extension_function=ste.SimpleExtensionDeclaration.ExtensionFunction(
-                    extension_uri_reference=registry.lookup_uri(uri),
+                    extension_uri_reference=registry.lookup_uri(func[0].uri),
                     function_anchor=func[0].anchor,
-                    name=function,
+                    name=func[0].name,
                 )
             )
         ]
@@ -270,7 +281,7 @@ def scalar_function(
                     ),
                     output_names=_alias_or_inferred(
                         alias,
-                        function,
+                        func[0].name,
                         [e.referred_expr[0].output_names[0] for e in bound_expressions],
                     ),
                 )
@@ -284,12 +295,12 @@ def scalar_function(
 
 
 def aggregate_function(
-    uri: str,
-    function: str,
+    function: Union[Iterable[str], str],
     expressions: Iterable[ExtendedExpressionOrUnbound],
     alias: Union[Iterable[str], str] = None,
 ):
     """Builds a resolver for ExtendedExpression containing a AggregateFunction measure"""
+    functions = [function] if isinstance(function, str) else function
 
     def resolve(
         base_schema: stp.NamedStruct, registry: ExtensionRegistry
@@ -304,7 +315,11 @@ def aggregate_function(
 
         signature = [typ for es in expression_schemas for typ in es.types]
 
-        func = registry.lookup_function(uri, function, signature)
+        for f in functions:
+            uri, name = f.split(":")
+            func = registry.lookup_function(uri, name, signature)
+            if func:
+                break
 
         if not func:
             raise Exception(f"Unknown function {function} for {signature}")
@@ -320,7 +335,7 @@ def aggregate_function(
                 extension_function=ste.SimpleExtensionDeclaration.ExtensionFunction(
                     extension_uri_reference=registry.lookup_uri(uri),
                     function_anchor=func[0].anchor,
-                    name=function,
+                    name=name,
                 )
             )
         ]
@@ -361,13 +376,13 @@ def aggregate_function(
 
 # TODO bounds, sorts
 def window_function(
-    uri: str,
-    function: str,
+    function: Union[Iterable[str], str],
     expressions: Iterable[ExtendedExpressionOrUnbound],
     partitions: Iterable[ExtendedExpressionOrUnbound] = [],
     alias: Union[Iterable[str], str] = None,
 ):
     """Builds a resolver for ExtendedExpression containing a WindowFunction expression"""
+    functions = [function] if isinstance(function, str) else function
 
     def resolve(
         base_schema: stp.NamedStruct, registry: ExtensionRegistry
@@ -386,7 +401,11 @@ def window_function(
 
         signature = [typ for es in expression_schemas for typ in es.types]
 
-        func = registry.lookup_function(uri, function, signature)
+        for f in functions:
+            uri, name = f.split(":")
+            func = registry.lookup_function(uri, name, signature)
+            if func:
+                break
 
         if not func:
             raise Exception(f"Unknown function {function} for {signature}")
@@ -402,7 +421,7 @@ def window_function(
                 extension_function=ste.SimpleExtensionDeclaration.ExtensionFunction(
                     extension_uri_reference=registry.lookup_uri(uri),
                     function_anchor=func[0].anchor,
-                    name=function,
+                    name=name,
                 )
             )
         ]
@@ -439,7 +458,7 @@ def window_function(
                     ),
                     output_names=_alias_or_inferred(
                         alias,
-                        function,
+                        name,
                         [e.referred_expr[0].output_names[0] for e in bound_expressions],
                     ),
                 )

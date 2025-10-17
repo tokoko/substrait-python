@@ -14,8 +14,7 @@ table = filter(table, expression=column("is_applicable"))
 table = filter(
     table,
     expression=scalar_function(
-        "functions_comparison.yaml",
-        "lt",
+        "functions_comparison.yaml:lt",
         expressions=[column("id"), literal(100, i64())],
     ),
 )

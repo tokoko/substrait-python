@@ -8,6 +8,7 @@ from substrait.builders.extended_expression import (
     literal,
     aggregate_function,
     window_function,
+    cast
 )
 from substrait.builders.plan import (
     read_named_table,
@@ -19,6 +20,7 @@ from substrait.builders.plan import (
     join,
     aggregate,
 )
+from substrait.builders.type import decimal, date
 from substrait.gen.proto import type_pb2 as stt
 from substrait.gen.proto import algebra_pb2 as stalg
 from substrait.extension_registry import ExtensionRegistry
@@ -28,18 +30,23 @@ from deepdiff import DeepDiff
 SchemaResolver = Callable[[str], stt.NamedStruct]
 
 function_mapping = {
-    "Plus": ("functions_arithmetic.yaml", "add"),
-    "Minus": ("functions_arithmetic.yaml", "subtract"),
-    "Gt": ("functions_comparison.yaml", "gt"),
-    "GtEq": ("functions_comparison.yaml", "gte"),
-    "Lt": ("functions_comparison.yaml", "lt"),
-    "Eq": ("functions_comparison.yaml", "equal"),
+    "plus": ["functions_arithmetic.yaml:add", "functions_arithmetic_decimal.yaml:add"],
+    "minus": ["functions_arithmetic.yaml:subtract", "functions_arithmetic_decimal.yaml:subtract"],
+    "multiply": ["functions_arithmetic.yaml:multiply", "functions_arithmetic_decimal.yaml:multiply"],
+    "gt": "functions_comparison.yaml:gt",
+    "gteq": "functions_comparison.yaml:gte",
+    "lt": "functions_comparison.yaml:lt",
+    "lteq": "functions_comparison.yaml:lte",
+    "eq": "functions_comparison.yaml:equal",
 }
 
-aggregate_function_mapping = {"SUM": ("functions_arithmetic.yaml", "sum")}
+aggregate_function_mapping = {
+    "sum": ["functions_arithmetic.yaml:sum", "functions_arithmetic_decimal.yaml:sum"],
+    "avg": ["functions_arithmetic.yaml:avg", "functions_arithmetic_decimal.yaml:avg"],
+}
 
 window_function_mapping = {
-    "row_number": ("functions_arithmetic.yaml", "row_number"),
+    "row_number": "functions_arithmetic.yaml:row_number",
 }
 
 
@@ -47,6 +54,16 @@ def compare_dicts(dict1, dict2):
     diff = DeepDiff(dict1, dict2, exclude_regex_paths=["span"])
     return len(diff) == 0
 
+def translate_data_type(
+    ast: dict
+) -> stt.Type:
+    data_type = list(ast.keys())[0]
+
+    if data_type == "Decimal":
+        precision, scale = ast["Decimal"]["PrecisionAndScale"]
+        return decimal(scale=scale, precision=precision)
+    else:
+        raise Exception(f"Unknown Data Tupe {data_type}")
 
 def translate_expression(
     ast: dict,
@@ -70,7 +87,7 @@ def translate_expression(
 
     if op == "Identifier":
         return column(ast["value"], alias=alias)
-    elif op == "UnnamedExpr" or op == "expr" or op == "Unnamed" or op == "Expr":
+    elif op in ["UnnamedExpr", "expr", "Unnamed", "Expr", "Nested"]:
         return translate_expression(
             ast,
             schema_resolver=schema_resolver,
@@ -104,12 +121,22 @@ def translate_expression(
                 groupings=groupings,
             ),
         ]
-        func = function_mapping[ast["op"]]
-        return scalar_function(func[0], func[1], expressions=expressions, alias=alias)
+        func = function_mapping[ast["op"].lower()]
+        return scalar_function(func, expressions=expressions, alias=alias)
     elif op == "Value":
         return literal(
             int(ast["value"]["Number"][0]), stt.Type(i64=stt.Type.I64()), alias=alias
         )  # TODO infer type
+    elif op == "TypedString":
+        if ast['data_type'] == 'Date':
+            import datetime
+            year, month, day = ast['value']['SingleQuotedString'].split("-")
+            return literal(
+                datetime.date(int(year), int(month), int(day)),
+                date()
+            )
+        else:
+            raise Exception("")
     elif op == "Function":
         expressions = [
             translate_expression(
@@ -121,7 +148,7 @@ def translate_expression(
             )
             for e in ast["args"]["List"]["args"]
         ]
-        name = ast["name"][0]["Identifier"]["value"]
+        name = ast["name"][0]["Identifier"]["value"].lower()
 
         if name in function_mapping:
             func = function_mapping[name]
@@ -138,7 +165,7 @@ def translate_expression(
             random_name = "".join(
                 random.choices(string.ascii_uppercase + string.digits, k=5)
             )  # TODO make this deterministic
-            aggr = aggregate_function(func[0], func[1], expressions, alias=random_name)
+            aggr = aggregate_function(func, expressions, alias=random_name)
             measures.append((aggr, ast, random_name))
             return column(random_name, alias=alias)
         elif name in window_function_mapping:
@@ -156,14 +183,30 @@ def translate_expression(
             ]
 
             return window_function(
-                func[0], func[1], expressions, partitions=partitions, alias=alias
+                func, expressions, partitions=partitions, alias=alias
             )
 
         else:
             raise Exception(f"Unknown function {name}")
-    # elif op == "Wildcard":
-    #     return wildcard()
+    elif op == "Cast":
+        expression = translate_expression(
+            ast['expr'],
+            schema_resolver=schema_resolver,
+            registry=registry,
+            measures=measures,
+            groupings=groupings
+        )
+
+        data_type = translate_data_type(
+            ast['data_type']
+        )
+
+        return cast(expression, data_type)
+    elif op == "Interval":
+        if
     else:
+        from pprint import pprint
+        pprint(ast)
         raise Exception(f"Unknown op {op}")
 
 

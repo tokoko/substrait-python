@@ -45,8 +45,7 @@ registry.register_extension_dict(yaml.safe_load(content), uri="test_uri")
 
 def test_sclar_add():
     e = scalar_function(
-        "test_uri",
-        "test_func",
+        "test_uri:test_func",
         expressions=[
             literal(
                 10,
@@ -109,12 +108,10 @@ def test_sclar_add():
 
 def test_nested_scalar_calls():
     e = scalar_function(
-        "test_uri",
-        "is_positive",
+        "test_uri:is_positive",
         expressions=[
             scalar_function(
-                "test_uri",
-                "test_func",
+                "test_uri:test_func",
                 expressions=[
                     literal(
                         10,
